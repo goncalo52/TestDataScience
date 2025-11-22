@@ -19,7 +19,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
-
+from boilerpy3 import extractors
 import requests
 from bs4 import BeautifulSoup
 
@@ -68,23 +68,55 @@ TARGET_DOMAINS = {
 }
 
 HIGH_RELEVANCE_KEYWORDS = [
+    # English
     "ukraine invasion", "russia invades ukraine", "putin invades",
     "russian invasion", "ukraine war", "russia ukraine war",
     "ukrainian war", "kyiv attack", "kiev attack", "mariupol",
-    "bucha", "irpin", "kharkiv", "донбас", "донбасс",
+    "bucha", "irpin", "kharkiv", "zaporizhzhia", "odesa",
+    "missile strike", "drone attack", "war crimes", "atrocities",
+    "kherson counteroffensive", "bakhmut",
+    
+    # Portuguese (PT)
+    "invasão russa", "guerra na ucrânia", "crimes de guerra",
+    "massacre de bucha", "tropas russas", "ataque de mísseis",
+    "contraofensiva",
+    
+    # Russian (RU)
+    "донбас", "донбасс", "спецоперация", "война на украине",
+    "ракетный обстрел", "территориальная целостность",
+    
+    # Ukrainian (UA)
+    "російське вторгнення", "війна в україні", "ракетний удар",
+    "збройні сили", "деокупація",
 ]
 
 MEDIUM_RELEVANCE_KEYWORDS = [
+    # English
     "ukraine", "russia", "putin", "zelensky", "zelenskyy",
-    "russian troops", "ukrainian forces", "nato ukraine",
-    "donbas", "donbass", "kyiv", "kiev", "crimea",
+    "russian troops", "ukrainian forces", "nato ukraine", "weapon supply",
+    "donbas", "donbass", "kyiv", "kiev", "crimea", "sanctions",
+    "oil embargo", "russian economy", "refugee crisis", "grain export",
+    "mobilization", "international criminal court", "united nations",
+    
+    # Portuguese (PT)
+    "sanções", "refugiados", "conflito", "ajuda militar",
+    "economia russa", "crise de energia", "otan",
+    
+    # Russian (RU)
+    "вооруженные силы", "санкции", "беженцы", "конфликт",
+    "помощь украине", "кремль",
+    
+    # Ukrainian (UA)
+    "нато", "путін", "допомога", "санкції", "зброя", "кремль",
+    "президент зеленський",
 ]
 
 EXCLUDE_KEYWORDS = [
+    # Keep these standard exclusions
     "recipe", "weather forecast", "sports", "football", "soccer",
     "celebrity", "fashion", "entertainment", "movie", "music",
+    "poker", "gaming", "bitcoin", "cryptocurrency", "real estate market",
 ]
-
 # ======================
 # Logging
 # ======================
@@ -398,31 +430,16 @@ def fetch_warc_range(warc_path, offset, length):
 # Article extraction (simplified)
 # ======================
 def extract_article(html, url):
-    """Extract article using BeautifulSoup."""
     try:
-        soup = BeautifulSoup(html, "html.parser")
+        extractor = extractors.ArticleExtractor()
+        doc = extractor.get_doc(html)
         
-        for s in soup(["script", "style", "noscript", "header", "footer", 
-                       "nav", "aside", "iframe", "form"]):
-            s.decompose()
-        
-        title = ""
-        title_tag = (soup.find("h1") or 
-                    soup.find("meta", property="og:title") or
-                    soup.find("title"))
-        if title_tag:
-            title = title_tag.get("content") if title_tag.has_attr("content") else title_tag.get_text()
-            title = title.strip()
-        
-        article_tag = soup.find("article")
-        if article_tag:
-            text = article_tag.get_text(separator="\n", strip=True)
-        else:
-            paragraphs = soup.find_all("p")
-            text = "\n".join(p.get_text(strip=True) for p in paragraphs)
-        
-        return {"title": title, "text": text}
-    except:
+        return {
+            "title": doc.title,
+            "text": doc.content
+        }
+    except Exception as e:
+        logger.debug(f"boilerpy3 extraction failed for {url}: {e}")
         return None
 
 # ======================
@@ -449,7 +466,7 @@ def calculate_relevance_score(text, title=""):
     
     return score, matched
 
-def is_relevant(text, title="", min_score=4):
+def is_relevant(text, title="", min_score=5):
     score, _ = calculate_relevance_score(text, title)
     return score >= min_score
 
@@ -527,33 +544,32 @@ def process_record(record, country, seen_set, out_dir, stats):
     
     # Save
     try:
-        day = datetime.utcnow().strftime("%Y-%m-%d")
-        country_dir = os.path.join(out_dir, country)
-        ensure_dir(country_dir)
-        file_path = os.path.join(country_dir, f"{day}.json")
-        
-        articles = []
-        if os.path.exists(file_path):
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    articles = json.load(f)
-            except:
-                articles = []
-        
-        articles.append(result)
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(articles, f, ensure_ascii=False, indent=2)
-        
-        seen_set.add(url_hash)
-        stats.articles_saved += 1
-        stats.sources[result['source']] += 1
-        
-        logger.info(f"✓ Saved (score={score}): {title[:60]}...")
-        
-        return result
-        
+            # Save as one line of JSON (JSON Lines format) for appending
+            day = datetime.utcnow().strftime("%Y-%m-%d")
+            country_dir = os.path.join(out_dir, country)
+            ensure_dir(country_dir)
+            # Use .jsonl extension for clarity (or keep .json if you prefer)
+            file_path = os.path.join(country_dir, f"{day}.jsonl") 
+            
+            # Use 'a' for append mode, '\n' to ensure separate lines
+            # and flush=True for immediate write
+            with open(file_path, "a", encoding="utf-8") as f: 
+                # Dumps the article result as a single line JSON object
+                json.dump(result, f, ensure_ascii=False) 
+                f.write('\n') # Newline separator
+                f.flush()
+            
+            seen_set.add(url_hash)
+            stats.articles_saved += 1
+            stats.sources[result['source']] += 1
+            
+            logger.info(f"✓ Saved (score={score}): {title[:60]}...")
+            
+            return result
+            
     except Exception as e:
         stats.errors["save_failed"] += 1
+        logger.error(f"Error saving article: {e}") # Added specific error logging
         return None
 
 # ======================
