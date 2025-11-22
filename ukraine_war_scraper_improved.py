@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-ukraine_war_scraper_improved.py
-
-Rate-limited scraper with better error handling and resumption support.
-Designed to work with GitHub Actions for incremental collection.
-"""
-
 import argparse
 import gzip
 import hashlib
@@ -22,6 +14,8 @@ from urllib.parse import urlparse
 from boilerpy3 import extractors
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta, UTC
+
 
 # Optional imports
 try:
@@ -39,30 +33,79 @@ try:
 except:
     detect = None
 
+# ======================
+# Logging setup
+# ======================
+def setup_logging(out_dir):
+    """Setup logging to both console and file."""
+    log_dir = os.path.join(out_dir, "logs")
+    ensure_dir(log_dir)
+    
+    log_file = os.path.join(
+        log_dir, 
+        f"scraper_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.log"
+    )
+    
+    # Create formatters
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)-8s] %(funcName)s:%(lineno)d - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    simple_formatter = logging.Formatter(
+        '%(asctime)s %(levelname)-8s %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    
+    # File handler (detailed, includes DEBUG)
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(detailed_formatter)
+    
+    # Console handler (simple, INFO and above)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(simple_formatter)
+    
+    # Setup logger
+    logger = logging.getLogger("ukraine_scraper")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logger.info(f"Logging to: {log_file}")
+    return logger
 
+# Initialize logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger("ukraine_scraper")
+
+# Initialize translator
 translator = None
 if GoogleTranslator:
+    logger.info("Deep-translator module FOUND.")
     try:
-        # Use source='auto' and target='en' (English)
         translator = GoogleTranslator(source='auto', target='en')
         logger.info("Translation enabled using GoogleTranslator.")
     except Exception as e:
         logger.warning(f"Failed to initialize GoogleTranslator: {e}")
         translator = None
 
-
 # ======================
 # Configuration
 # ======================
 DEFAULT_OUTPUT = "ukraine_war_data"
-DEFAULT_TARGET = 50  # Reduced for hourly runs
-DEFAULT_WORKERS = 3  # Reduced to avoid rate limits
-DEFAULT_REQUEST_DELAY = 2.0  # Increased delay
-DEFAULT_CDX_LIMIT = 100  # Reduced per query
+DEFAULT_TARGET = 50
+DEFAULT_WORKERS = 3
+DEFAULT_REQUEST_DELAY = 2.0
+DEFAULT_CDX_LIMIT = 200
 
 # Rate limiting
-MAX_REQUESTS_PER_RUN = 200  # Hard limit per execution
-MIN_REQUEST_INTERVAL = 1.5  # Minimum seconds between requests
+MAX_REQUESTS_PER_RUN = 200
+MIN_REQUEST_INTERVAL = 1.5
 MAX_RETRIES = 3
 BACKOFF_FACTOR = 3
 
@@ -124,62 +167,10 @@ MEDIUM_RELEVANCE_KEYWORDS = [
 ]
 
 EXCLUDE_KEYWORDS = [
-    # Keep these standard exclusions
     "recipe", "weather forecast", "sports", "football", "soccer",
     "celebrity", "fashion", "entertainment", "movie", "music",
     "poker", "gaming", "bitcoin", "cryptocurrency", "real estate market",
 ]
-# ======================
-# Logging
-# ======================
-def setup_logging(out_dir):
-    """Setup logging to both console and file."""
-    # Create logs directory
-    log_dir = os.path.join(out_dir, "logs")
-    ensure_dir(log_dir)
-    
-    # Log filename with timestamp
-    log_file = os.path.join(
-        log_dir, 
-        f"scraper_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.log"
-    )
-    
-    # Create formatters
-    detailed_formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)-8s] %(funcName)s:%(lineno)d - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    simple_formatter = logging.Formatter(
-        '%(asctime)s %(levelname)-8s %(message)s',
-        datefmt='%H:%M:%S'
-    )
-    
-    # File handler (detailed, includes DEBUG)
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(detailed_formatter)
-    
-    # Console handler (simple, INFO and above)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(simple_formatter)
-    
-    # Setup logger
-    logger = logging.getLogger("ukraine_scraper")
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    logger.info(f"Logging to: {log_file}")
-    return logger
-
-# Initialize with default logger (will be reconfigured in main)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger("ukraine_scraper")
 
 # ======================
 # Request tracker with rate limiting
@@ -274,7 +265,7 @@ def md5(text: str):
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 def now_iso():
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(UTC).isoformat().replace('+00:00', 'Z')
 
 # ======================
 # Session with User-Agent
@@ -439,7 +430,7 @@ def fetch_warc_range(warc_path, offset, length):
     return None
 
 # ======================
-# Article extraction (simplified)
+# Article extraction
 # ======================
 def extract_article(html, url):
     try:
@@ -478,38 +469,31 @@ def calculate_relevance_score(text, title=""):
     
     return score, matched
 
-def is_relevant(text, title="", min_score=5):
+def is_relevant(text, title="", min_score=4):
     score, _ = calculate_relevance_score(text, title)
     return score >= min_score
 
-
+# ======================
+# Translation
+# ======================
 def translate_text(text_to_translate):
     """Translates text to English using GoogleTranslator, handling errors."""
     if not translator:
         return None, "translator_not_available"
     
-    # We only want to translate if the source country is not EN,
-    # but using source='auto' in the translator handles language detection anyway.
-    
-    # Keep translation within a manageable length to avoid API issues
     MAX_TRANSLATION_CHARS = 4800 
     
     try:
-        # Only attempt translation if the text isn't too long
         if len(text_to_translate) > MAX_TRANSLATION_CHARS:
             text_to_translate = text_to_translate[:MAX_TRANSLATION_CHARS] + "..."
             
         translated_text = translator.translate(text_to_translate)
-        
-        # Add a short, random delay to help mitigate rate limits
         time.sleep(random.uniform(0.1, 0.5))
         
         return translated_text, None
     except Exception as e:
-        # This catches HTTP errors, API errors, and rate limits
         logger.warning(f"Translation failed: {type(e).__name__} - {e}")
         return None, type(e).__name__
-
 
 # ======================
 # Process record
@@ -522,7 +506,10 @@ def process_record(record, country, seen_set, out_dir, stats):
     url = record.get("url")
     if not url or not url.startswith("http"):
         return None
-    
+    if url.strip('/').endswith(urlparse(url).netloc):
+        if url.strip('/') == urlparse(url).netloc or any(p in url for p in ['/block-lastnews', '/info/']):
+            logger.debug(f"Skipping low-quality URL: {url}")
+            return None
     url_hash = md5(url)
     if url_hash in seen_set:
         stats.duplicates_skipped += 1
@@ -570,30 +557,47 @@ def process_record(record, country, seen_set, out_dir, stats):
     
     score, keywords = calculate_relevance_score(text, title)
     
-   if translator:
-        # 1. Translate Title
+    # Translation
+    title_en = None
+    text_en = None
+    translation_status = "not_attempted"
+
+    if country == "EN":
+        title_en = title
+        text_en = text
+        translation_status = "native_english"
+    elif translator:
         title_en, title_error = translate_text(title)
-        
-        # 2. Translate Text
         text_en, text_error = translate_text(text)
-        
+            
         if title_error or text_error:
             translation_status = "failed"
             stats.errors["translation_failed"] += 1
         else:
             translation_status = "success"
+    else:
+        translation_status = "translator_not_available"
         
-    # --- END TRANSLATION BLOCK ---
+    def clean_text(s):
+        if s is None:
+            return None
+        s = s.replace('\n', '\\n').replace('\r', '').replace('\t', ' ')
+        return ' '.join(s.split()).strip()
+
+    title = clean_text(title)
+    text = clean_text(text)
+    title_en = clean_text(title_en)
+    text_en = clean_text(text_en)
     
     result = {
         "url": url,
         "source": urlparse(url).netloc,
         "country": country,
         "title": title,
-        "title_en": title_en, # <--- NEW
+        "title_en": title_en, 
         "text": text,
-        "text_en": text_en,   # <--- NEW
-        "translation_status": translation_status, # <--- NEW (Good for data analysis)
+        "text_en": text_en,   
+        "translation_status": translation_status, 
         "crawl_timestamp": record.get("timestamp"),
         "relevance_score": score,
         "matched_keywords": keywords[:5],
@@ -603,32 +607,27 @@ def process_record(record, country, seen_set, out_dir, stats):
     
     # Save
     try:
-            # Save as one line of JSON (JSON Lines format) for appending
-            day = datetime.utcnow().strftime("%Y-%m-%d")
-            country_dir = os.path.join(out_dir, country)
-            ensure_dir(country_dir)
-            # Use .jsonl extension for clarity (or keep .json if you prefer)
-            file_path = os.path.join(country_dir, f"{day}.jsonl") 
-            
-            # Use 'a' for append mode, '\n' to ensure separate lines
-            # and flush=True for immediate write
-            with open(file_path, "a", encoding="utf-8") as f: 
-                # Dumps the article result as a single line JSON object
-                json.dump(result, f, ensure_ascii=False) 
-                f.write('\n') # Newline separator
-                f.flush()
-            
-            seen_set.add(url_hash)
-            stats.articles_saved += 1
-            stats.sources[result['source']] += 1
-            
-            logger.info(f"✓ Saved (score={score}): {title[:60]}...")
-            
-            return result
+        day = datetime.now(UTC).strftime("%Y-%m-%d")
+        country_dir = os.path.join(out_dir, country)
+        ensure_dir(country_dir)
+        file_path = os.path.join(country_dir, f"{day}.jsonl") 
+        
+        with open(file_path, "a", encoding="utf-8") as f: 
+            json.dump(result, f, ensure_ascii=False) 
+            f.write('\n')
+            f.flush()
+        
+        seen_set.add(url_hash)
+        stats.articles_saved += 1
+        stats.sources[result['source']] += 1
+        
+        logger.info(f"✓ Saved (score={score}): {title[:60]}...")
+        
+        return result
             
     except Exception as e:
         stats.errors["save_failed"] += 1
-        logger.error(f"Error saving article: {e}") # Added specific error logging
+        logger.error(f"Error saving article: {e}")
         return None
 
 # ======================
@@ -696,7 +695,7 @@ def run_scraper(domains_map,
                 logger.info(f"    Found {len(records)} records in {idx}")
                 stats.records_fetched += len(records)
                 
-                # Process records sequentially (safer for rate limiting)
+                # Process records sequentially
                 for rec in records[:50]:
                     if stats.articles_saved >= target_limit or tracker.is_blocked():
                         break
