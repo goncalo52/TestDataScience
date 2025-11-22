@@ -6,3 +6,4 @@ lxml>=4.9.0
 newspaper3k>=0.2.8
 deep-translator>=1.11.4
 langdetect>=1.0.9
+boilerpy3>=1.0.7
