@@ -18,7 +18,8 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 50
-    
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
