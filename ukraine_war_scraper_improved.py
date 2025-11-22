@@ -39,6 +39,18 @@ try:
 except:
     detect = None
 
+
+translator = None
+if GoogleTranslator:
+    try:
+        # Use source='auto' and target='en' (English)
+        translator = GoogleTranslator(source='auto', target='en')
+        logger.info("Translation enabled using GoogleTranslator.")
+    except Exception as e:
+        logger.warning(f"Failed to initialize GoogleTranslator: {e}")
+        translator = None
+
+
 # ======================
 # Configuration
 # ======================
@@ -470,6 +482,35 @@ def is_relevant(text, title="", min_score=5):
     score, _ = calculate_relevance_score(text, title)
     return score >= min_score
 
+
+def translate_text(text_to_translate):
+    """Translates text to English using GoogleTranslator, handling errors."""
+    if not translator:
+        return None, "translator_not_available"
+    
+    # We only want to translate if the source country is not EN,
+    # but using source='auto' in the translator handles language detection anyway.
+    
+    # Keep translation within a manageable length to avoid API issues
+    MAX_TRANSLATION_CHARS = 4800 
+    
+    try:
+        # Only attempt translation if the text isn't too long
+        if len(text_to_translate) > MAX_TRANSLATION_CHARS:
+            text_to_translate = text_to_translate[:MAX_TRANSLATION_CHARS] + "..."
+            
+        translated_text = translator.translate(text_to_translate)
+        
+        # Add a short, random delay to help mitigate rate limits
+        time.sleep(random.uniform(0.1, 0.5))
+        
+        return translated_text, None
+    except Exception as e:
+        # This catches HTTP errors, API errors, and rate limits
+        logger.warning(f"Translation failed: {type(e).__name__} - {e}")
+        return None, type(e).__name__
+
+
 # ======================
 # Process record
 # ======================
@@ -529,12 +570,30 @@ def process_record(record, country, seen_set, out_dir, stats):
     
     score, keywords = calculate_relevance_score(text, title)
     
+   if translator:
+        # 1. Translate Title
+        title_en, title_error = translate_text(title)
+        
+        # 2. Translate Text
+        text_en, text_error = translate_text(text)
+        
+        if title_error or text_error:
+            translation_status = "failed"
+            stats.errors["translation_failed"] += 1
+        else:
+            translation_status = "success"
+        
+    # --- END TRANSLATION BLOCK ---
+    
     result = {
         "url": url,
         "source": urlparse(url).netloc,
         "country": country,
         "title": title,
+        "title_en": title_en, # <--- NEW
         "text": text,
+        "text_en": text_en,   # <--- NEW
+        "translation_status": translation_status, # <--- NEW (Good for data analysis)
         "crawl_timestamp": record.get("timestamp"),
         "relevance_score": score,
         "matched_keywords": keywords[:5],
