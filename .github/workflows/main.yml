@@ -36,8 +36,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install requests beautifulsoup4 lxml
-          # Optional: pip install newspaper3k deep-translator langdetect
+          # Use the -r flag to install ALL packages listed in requirements.txt
+          pip install -r requirements.txt
       
       - name: Run scraper
         run: |
