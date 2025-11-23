@@ -2,7 +2,7 @@
 name: Scrape Ukraine War Data
 
 on:
-  # Run every 6 hours to avoid rate limits
+  # Run every 2 hours
   schedule:
     - cron: '0 */2 * * *'
   
@@ -113,21 +113,21 @@ jobs:
           
           # Create commit with stats
           DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
-          SAVED=${{ steps.get_log.outputs.articles_saved }}
-          PROCESSED=${{ steps.get_log.outputs.records_processed }}
-          TOTAL=${{ steps.check_data.outputs.article_count }}
-          SIZE=${{ steps.check_data.outputs.data_size }}
+          SAVED="${{ steps.get_log.outputs.articles_saved }}"
+          PROCESSED="${{ steps.get_log.outputs.records_processed }}"
+          REQUESTS="${{ steps.get_log.outputs.requests_made }}"
+          TOTAL="${{ steps.check_data.outputs.article_count }}"
+          SIZE="${{ steps.check_data.outputs.data_size }}"
           
-          git commit -m "Update: $DATE
-
-This run:
-- Saved: $SAVED articles
-- Processed: $PROCESSED records
-- Requests: ${{ steps.get_log.outputs.requests_made }}
-
-Total: $TOTAL articles ($SIZE)
-
-[skip ci]"
+          git commit -m "Update: $DATE" \
+            -m "📊 This run:" \
+            -m "- Saved: $SAVED articles" \
+            -m "- Processed: $PROCESSED records" \
+            -m "- Requests: $REQUESTS" \
+            -m "" \
+            -m "📈 Total: $TOTAL articles ($SIZE)" \
+            -m "" \
+            -m "[skip ci]"
           
           git push
       
