@@ -2,9 +2,9 @@
 name: Scrape Ukraine War Data
 
 on:
-  # Run every 2 hours
+  # Run every hour
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '0 * * * *'
   
   # Allow manual trigger
   workflow_dispatch:
@@ -13,10 +13,6 @@ on:
         description: 'Number of articles to collect'
         required: false
         default: '50'
-      max_requests:
-        description: 'Max API requests'
-        required: false
-        default: '200'
 
 jobs:
   scrape:
@@ -24,17 +20,17 @@ jobs:
     timeout-minutes: 50
     permissions:
       contents: write
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # Need to fetch full history to preserve data
           fetch-depth: 0
       
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
           cache: 'pip'
       
       - name: Install dependencies
@@ -45,26 +41,18 @@ jobs:
       - name: Run scraper
         run: |
           TARGET=${{ github.event.inputs.target || '50' }}
-          MAX_REQ=${{ github.event.inputs.max_requests || '200' }}
           python ukraine_war_scraper_improved.py \
             --out ukraine_war_data \
             --target $TARGET \
-            --max-requests $MAX_REQ
+            --max-requests 200
       
       - name: Check for new data
         id: check_data
         run: |
           if [ -d "ukraine_war_data" ]; then
-            # Count JSONL files
-            FILE_COUNT=$(find ukraine_war_data -name "*.jsonl" -o -name "*.json" | wc -l)
+            # Count JSON files
+            FILE_COUNT=$(find ukraine_war_data -name "*.json" | wc -l)
             echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT
-            
-            # Count total articles
-            ARTICLE_COUNT=0
-            if [ $FILE_COUNT -gt 0 ]; then
-              ARTICLE_COUNT=$(find ukraine_war_data -name "*.jsonl" -type f -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
-            fi
-            echo "article_count=$ARTICLE_COUNT" >> $GITHUB_OUTPUT
             
             # Get data size
             DATA_SIZE=$(du -sh ukraine_war_data | cut -f1)
@@ -77,8 +65,6 @@ jobs:
             fi
           else
             echo "has_data=false" >> $GITHUB_OUTPUT
-            echo "file_count=0" >> $GITHUB_OUTPUT
-            echo "article_count=0" >> $GITHUB_OUTPUT
           fi
       
       - name: Commit and push data
@@ -90,15 +76,15 @@ jobs:
           
           # Create commit with stats
           DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
-          FILES="${{ steps.check_data.outputs.file_count }}"
-          ARTICLES="${{ steps.check_data.outputs.article_count }}"
-          SIZE="${{ steps.check_data.outputs.data_size }}"
+          FILES=${{ steps.check_data.outputs.file_count }}
+          SIZE=${{ steps.check_data.outputs.data_size }}
           
-          git diff --staged --quiet || git commit -m "Data collection: $DATE" \
-            -m "Files: $FILES" \
-            -m "Articles: $ARTICLES" \
-            -m "Size: $SIZE" \
-            -m "[skip ci]"
+          git diff --staged --quiet || git commit -m "Data collection: $DATE
+          
+          Files: $FILES
+          Total size: $SIZE
+          
+          [skip ci]"
           
           git push
       
@@ -109,7 +95,7 @@ jobs:
           name: ukraine-war-data-${{ github.run_number }}
           path: ukraine_war_data/
           retention-days: 30
-      
+
       - name: Create summary
         if: always()
         run: |
@@ -117,7 +103,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Date**: $(date -u +"%Y-%m-%d %H:%M UTC")" >> $GITHUB_STEP_SUMMARY
           echo "- **Files**: ${{ steps.check_data.outputs.file_count }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Articles**: ${{ steps.check_data.outputs.article_count }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Size**: ${{ steps.check_data.outputs.data_size }}" >> $GITHUB_STEP_SUMMARY
           
           if [ -f "ukraine_war_data/progress.json" ]; then
@@ -125,15 +110,5 @@ jobs:
             echo "### Progress" >> $GITHUB_STEP_SUMMARY
             echo '```json' >> $GITHUB_STEP_SUMMARY
             cat ukraine_war_data/progress.json >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          # Show latest log if available
-          LATEST_LOG=$(ls -t ukraine_war_data/logs/scrape_*.log 2>/dev/null | head -1)
-          if [ -n "$LATEST_LOG" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Latest Log" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -20 "$LATEST_LOG" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
