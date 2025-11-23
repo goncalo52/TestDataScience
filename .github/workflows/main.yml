@@ -118,16 +118,7 @@ jobs:
           TOTAL=${{ steps.check_data.outputs.article_count }}
           SIZE=${{ steps.check_data.outputs.data_size }}
           
-          git commit -m "Update: $DATE
-
-📊 This run:
-- Saved: $SAVED articles
-- Processed: $PROCESSED records
-- Requests: ${{ steps.get_log.outputs.requests_made }}
-
-📈 Total: $TOTAL articles ($SIZE)
-
-[skip ci]"
+          git commit -m "Update: $DATE" -m "📊 This run:" -m "- Saved: $SAVED articles" -m "- Processed: $PROCESSED records" -m "- Requests: ${{ steps.get_log.outputs.requests_made }}" -m "" -m "📈 Total: $TOTAL articles ($SIZE)" -m "" -m "[skip ci]"
           
           git push
       
