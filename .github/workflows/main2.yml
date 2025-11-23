@@ -1,0 +1,183 @@
+# .github/workflows/scrape.yml
+name: Scrape Ukraine War Data
+
+on:
+  # Run every 6 hours to avoid rate limits
+  schedule:
+    - cron: '0 */2 * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Number of articles to collect'
+        required: false
+        default: '50'
+      max_requests:
+        description: 'Max API requests'
+        required: false
+        default: '200'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run scraper
+        run: |
+          TARGET=${{ github.event.inputs.target || '50' }}
+          MAX_REQ=${{ github.event.inputs.max_requests || '200' }}
+          
+          python testing.py \
+            --out ukraine_war_data \
+            --target $TARGET \
+            --max-requests $MAX_REQ
+      
+      - name: Get latest log file
+        id: get_log
+        run: |
+          if [ -d "ukraine_war_data/logs" ]; then
+            LATEST_LOG=$(ls -t ukraine_war_data/logs/scrape_*.log | head -1)
+            echo "log_file=$LATEST_LOG" >> $GITHUB_OUTPUT
+            
+            # Extract stats from log
+            SAVED=$(grep "Articles saved:" "$LATEST_LOG" | tail -1 | awk '{print $NF}')
+            PROCESSED=$(grep "Records processed:" "$LATEST_LOG" | tail -1 | awk '{print $NF}')
+            REQUESTS=$(grep "Requests made:" "$LATEST_LOG" | tail -1 | awk '{print $3}')
+            
+            echo "articles_saved=${SAVED:-0}" >> $GITHUB_OUTPUT
+            echo "records_processed=${PROCESSED:-0}" >> $GITHUB_OUTPUT
+            echo "requests_made=${REQUESTS:-0}" >> $GITHUB_OUTPUT
+          else
+            echo "articles_saved=0" >> $GITHUB_OUTPUT
+            echo "records_processed=0" >> $GITHUB_OUTPUT
+            echo "requests_made=0" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Check for new data
+        id: check_data
+        run: |
+          if [ -d "ukraine_war_data" ]; then
+            # Count JSONL files
+            JSONL_COUNT=$(find ukraine_war_data -name "*.jsonl" -type f | wc -l)
+            echo "jsonl_count=$JSONL_COUNT" >> $GITHUB_OUTPUT
+            
+            # Count total articles in JSONL files
+            ARTICLE_COUNT=0
+            if [ $JSONL_COUNT -gt 0 ]; then
+              ARTICLE_COUNT=$(find ukraine_war_data -name "*.jsonl" -type f -exec wc -l {} + | tail -1 | awk '{print $1}')
+            fi
+            echo "article_count=$ARTICLE_COUNT" >> $GITHUB_OUTPUT
+            
+            # Get data size
+            DATA_SIZE=$(du -sh ukraine_war_data | cut -f1)
+            echo "data_size=$DATA_SIZE" >> $GITHUB_OUTPUT
+            
+            # Check if git has changes
+            git add ukraine_war_data/
+            if git diff --staged --quiet; then
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            else
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "jsonl_count=0" >> $GITHUB_OUTPUT
+            echo "article_count=0" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Commit and push data
+        if: steps.check_data.outputs.has_changes == 'true'
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          
+          # Create commit with stats
+          DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
+          SAVED=${{ steps.get_log.outputs.articles_saved }}
+          PROCESSED=${{ steps.get_log.outputs.records_processed }}
+          TOTAL=${{ steps.check_data.outputs.article_count }}
+          SIZE=${{ steps.check_data.outputs.data_size }}
+          
+          git commit -m "Update: $DATE
+
+This run:
+- Saved: $SAVED articles
+- Processed: $PROCESSED records
+- Requests: ${{ steps.get_log.outputs.requests_made }}
+
+Total: $TOTAL articles ($SIZE)
+
+[skip ci]"
+          
+          git push
+      
+      - name: Upload log artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-logs-${{ github.run_number }}
+          path: ukraine_war_data/logs/
+          retention-days: 7
+      
+      - name: Upload data artifacts (if failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-backup-${{ github.run_number }}
+          path: ukraine_war_data/
+          retention-days: 30
+      
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## 📰 Scraping Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### This Run" >> $GITHUB_STEP_SUMMARY
+          echo "- Articles saved: **${{ steps.get_log.outputs.articles_saved }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- Records processed: ${{ steps.get_log.outputs.records_processed }}" >> $GITHUB_STEP_SUMMARY
+          echo "- API requests: ${{ steps.get_log.outputs.requests_made }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Total Dataset" >> $GITHUB_STEP_SUMMARY
+          echo "- Total articles: **${{ steps.check_data.outputs.article_count }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- JSONL files: ${{ steps.check_data.outputs.jsonl_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Dataset size: ${{ steps.check_data.outputs.data_size }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "ukraine_war_data/progress.json" ]; then
+            echo "### Progress State" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            cat ukraine_war_data/progress.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "${{ steps.get_log.outputs.log_file }}" ]; then
+            echo "### Recent Log Output" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -30 "${{ steps.get_log.outputs.log_file }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
