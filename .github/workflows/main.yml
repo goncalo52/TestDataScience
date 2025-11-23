@@ -2,7 +2,7 @@
 name: Scrape Ukraine War Data
 
 on:
-  # Run every 6 hours to avoid rate limits
+  # Run every 2 hours
   schedule:
     - cron: '0 */2 * * *'
   
