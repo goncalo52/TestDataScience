@@ -44,7 +44,7 @@ jobs:
           python ukraine_war_scraper_improved.py \
             --out ukraine_war_data \
             --target $TARGET \
-            --max-requests 200
+            --max-requests 500
       
       - name: Check for new data
         id: check_data
