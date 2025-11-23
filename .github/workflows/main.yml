@@ -47,7 +47,7 @@ jobs:
           TARGET=${{ github.event.inputs.target || '50' }}
           MAX_REQ=${{ github.event.inputs.max_requests || '200' }}
           
-          python testing.py \
+          python ukraine_war_scraper_improved \
             --out ukraine_war_data \
             --target $TARGET \
             --max-requests $MAX_REQ
