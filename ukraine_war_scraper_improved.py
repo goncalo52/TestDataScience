@@ -39,7 +39,7 @@ DOMAINS = {
 }
 
 
-HIGH_RELEVANCE_KEYWORDS = [
+HIGH_KEYWORDS = [
     # English
     "ukraine invasion", "russia invades ukraine", "putin invades",
     "russian invasion", "ukraine war", "russia ukraine war",
@@ -62,7 +62,7 @@ HIGH_RELEVANCE_KEYWORDS = [
     "збройні сили", "деокупація",
 ]
 
-MEDIUM_RELEVANCE_KEYWORDS = [
+MEDIUM_KEYWORDS = [
     # English
     "ukraine", "russia", "putin", "zelensky", "zelenskyy",
     "russian troops", "ukrainian forces", "nato ukraine", "weapon supply",
@@ -83,7 +83,7 @@ MEDIUM_RELEVANCE_KEYWORDS = [
     "президент зеленський",
 ]
 
-EXCLUDE_KEYWORDS = [
+EXCLUDE = [
     "recipe", "weather forecast", "sports", "football", "soccer",
     "celebrity", "fashion", "entertainment", "movie", "music",
     "poker", "gaming", "bitcoin", "cryptocurrency", "real estate market",
