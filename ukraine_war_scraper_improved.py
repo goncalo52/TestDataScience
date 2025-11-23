@@ -21,8 +21,8 @@ except:
 
 # Configuration
 OUTPUT_DIR = "ukraine_war_data"
-TARGET_ARTICLES = 50
-MAX_REQUESTS = 200
+TARGET_ARTICLES = 100
+MAX_REQUESTS = 1000
 REQUEST_DELAY = 1.5
 
 CRAWL_INDICES = [
@@ -335,7 +335,7 @@ def process_record(record, country, seen):
     
     # Check relevance
     score, keywords = score_relevance(text, title)
-    if score < 4:  # Lowered threshold to see more results
+    if score < 3:  # Lowered threshold to see more results
         logger.debug(f"Low relevance (score={score}): {title[:60]}")
         return None
     
