@@ -298,9 +298,9 @@ def process_gdelt_articles(json_file, output_file, delay=3, save_every=5, source
 
 
 if __name__ == "__main__":
-    input_directory = './data/gdeltdata/gdelt_portuguese_data'
-    output_directory = './data/scrapped/scrapped_portuguese'
-        
+    input_directory = 'data/gdeltdata/gdelt_portuguese_data'
+    output_directory = 'data/scrapped/scrapped_portuguese'
+    
     os.makedirs(output_directory, exist_ok=True)
     
     if not os.path.exists(input_directory):
