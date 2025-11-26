@@ -1,40 +1,73 @@
+# ============================================
+# FILE 1: scrape-portuguese.yml
+# ============================================
 name: Scrape Portuguese (Arquivo.pt)
-
 on:
   schedule:
-    - cron: '0 */3 * * *'  # Every 6 hours
-  workflow_dispatch:  # Manual trigger
+    - cron: '0 */3 * * *'  # Every 3 hours
+  workflow_dispatch:
+
+# Prevent concurrent runs across ALL scraping workflows
+concurrency:
+  group: scraping-workflows
+  cancel-in-progress: false  # Wait for other scraper to finish
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-    
-    - name: Install dependencies
-      run: |
-        pip install requests beautifulsoup4 deep-translator
-    
-    - name: Run scraper (single file mode)
-      run: |
-        python scripts/arquivo_scraper.py --single
-    
-    - name: Commit and push results
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add data/scrapped/
-        if ! git diff --staged --quiet; then
-          git commit -m "Update scraped articles [skip ci]"
-          git push
-        else
-          echo "No changes to commit"
-        fi
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 deep-translator
+          
+      - name: Run scraper (single file mode)
+        run: |
+          python scripts/arquivo_scraper.py --single
+          
+      - name: Commit and push results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/scrapped/
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "Update scraped articles (Portuguese) [skip ci]"
+            
+            # Pull with rebase before pushing
+            git pull --rebase origin main
+            
+            # Retry logic
+            max_retries=5
+            retry_count=0
+            
+            while [ $retry_count -lt $max_retries ]; do
+              if git push origin main; then
+                echo "Push successful"
+                exit 0
+              else
+                echo "Push failed, attempt $((retry_count + 1)) of $max_retries"
+                retry_count=$((retry_count + 1))
+                
+                if [ $retry_count -lt $max_retries ]; then
+                  git pull --rebase origin main
+                  sleep 5
+                fi
+              fi
+            done
+            
+            echo "Failed to push after $max_retries attempts"
+            exit 1
+          else
+            echo "No changes to commit"
+          fi
