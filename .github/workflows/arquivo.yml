@@ -25,8 +25,7 @@ jobs:
     
     - name: Run scraper
       run: |
-        cd scripts
-        python arquivo_scraper.py 2>&1 | tee ../scrape.log
+        python scripts/arquivo_scraper.py 2>&1 | tee scrape.log
     
     - name: Commit results
       run: |
