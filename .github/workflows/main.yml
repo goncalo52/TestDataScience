@@ -6,7 +6,7 @@
 name: Scrape Russian & Ukrainian (Wayback)
 on:
   schedule:
-    - cron: '15 */3 * * *'  # Every 3 hours, offset by 15 minutes
+    - cron: '0 2,5,8,11,14,17,20,23 * * *' 
   workflow_dispatch:
 
 # Same concurrency group - ensures only one scraper runs at a time
