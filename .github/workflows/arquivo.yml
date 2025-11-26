@@ -23,14 +23,18 @@ jobs:
       run: |
         pip install requests beautifulsoup4 deep-translator
     
-    - name: Run scraper
+    - name: Run scraper (single file mode)
       run: |
-        python scripts/arquivo_scraper.py 2>&1 | tee scrape.log
+        python scripts/arquivo_scraper.py --single
     
-    - name: Commit results
+    - name: Commit and push results
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add data/scrapped/
-        git diff --staged --quiet || git commit -m "Update scraped articles [skip ci]"
-        git push
+        if ! git diff --staged --quiet; then
+          git commit -m "Update scraped articles [skip ci]"
+          git push
+        else
+          echo "No changes to commit"
+        fi
