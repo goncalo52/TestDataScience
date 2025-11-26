@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from bs4 import BeautifulSoup
 import os
+import sys
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from urllib.parse import quote
@@ -297,30 +298,68 @@ def process_gdelt_articles(json_file, output_file, delay=3, save_every=5, source
     print(f"{'='*60}")
 
 
+def get_next_file_to_process(input_directory, output_directory):
+    """Find the next file that needs processing"""
+    if not os.path.exists(input_directory):
+        return None
+    
+    input_files = sorted([f for f in os.listdir(input_directory) if f.endswith('.json')])
+    
+    for filename in input_files:
+        output_file = os.path.join(output_directory, filename)
+                if not os.path.exists(output_file):
+            return filename
+    
+    return None
+
+
 if __name__ == "__main__":
     input_directory = 'data/gdeltdata/gdelt_portuguese_data'
     output_directory = 'data/scrapped/scrapped_portuguese'
     
     os.makedirs(output_directory, exist_ok=True)
     
-    if not os.path.exists(input_directory):
-        print(f"Error: Input directory not found: {input_directory}")
-    else:
-        for filename in sorted(os.listdir(input_directory)):
-            if filename.endswith('.json'):
-                input_file = os.path.join(input_directory, filename)
-                output_file = os.path.join(output_directory, filename)
-                
-                print(f"\n{'='*60}")
-                print(f"Processing: {filename}")
-                print(f"Output: {output_file}")
-                print(f"{'='*60}\n")
-                
-                try:
-                    process_gdelt_articles(input_file, output_file, delay=3, save_every=5, source_lang='pt')
-                except Exception as e:
-                    print(f"Error processing {filename}: {e}")
-                
-                time.sleep(5)
+    if len(sys.argv) > 1 and sys.argv[1] == '--single':
+        next_file = get_next_file_to_process(input_directory, output_directory)
         
-        print("\n✓ All Portuguese files processed using Arquivo.pt!")
+        if next_file:
+            input_file = os.path.join(input_directory, next_file)
+            output_file = os.path.join(output_directory, next_file)
+            
+            print(f"\n{'='*60}")
+            print(f"Processing SINGLE file: {next_file}")
+            print(f"Output: {output_file}")
+            print(f"{'='*60}\n")
+            
+            try:
+                process_gdelt_articles(input_file, output_file, delay=3, save_every=5, source_lang='pt')
+                print(f"\n✓ Successfully completed {next_file}")
+            except Exception as e:
+                print(f"\n✗ Error processing {next_file}: {e}")
+                sys.exit(1)
+        else:
+            print("✓ All files already processed!")
+            sys.exit(0)
+    
+    else:
+        if not os.path.exists(input_directory):
+            print(f"Error: Input directory not found: {input_directory}")
+        else:
+            for filename in sorted(os.listdir(input_directory)):
+                if filename.endswith('.json'):
+                    input_file = os.path.join(input_directory, filename)
+                    output_file = os.path.join(output_directory, filename)
+                    
+                    print(f"\n{'='*60}")
+                    print(f"Processing: {filename}")
+                    print(f"Output: {output_file}")
+                    print(f"{'='*60}\n")
+                    
+                    try:
+                        process_gdelt_articles(input_file, output_file, delay=3, save_every=5, source_lang='pt')
+                    except Exception as e:
+                        print(f"Error processing {filename}: {e}")
+                    
+                    time.sleep(5)
+            
+            print("\n✓ All Portuguese files processed using Arquivo.pt!")
