@@ -307,7 +307,7 @@ def get_next_file_to_process(input_directory, output_directory):
     
     for filename in input_files:
         output_file = os.path.join(output_directory, filename)
-                if not os.path.exists(output_file):
+        if not os.path.exists(output_file):
             return filename
     
     return None
