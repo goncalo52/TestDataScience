@@ -25,13 +25,8 @@ jobs:
           pip install -r requirements.txt
           
       - name: Ensure output directory structure exists
-        # This creates the necessary input folder so the script doesn't fail 
-        # when listing files, even if no JSON files are present yet.
         run: |
           mkdir -p ./data/gdeltdata/gdelt_portuguese_data
 
       - name: Run Arquivo Scraper and Log Progress
-        # Run the script from the project root.
-        # Note: Your script uses relative paths like './data/...', so ensure 
-        # it is located at 'scripts/arquivo_scraper.py' relative to the root.
-        run: python3 arquivo_scraper.py
+        run: python3 scripts/arquivo_scraper.py
