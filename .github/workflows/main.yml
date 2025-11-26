@@ -1,114 +1,158 @@
-# .github/workflows/scrape.yml
-name: Scrape Ukraine War Data
+name: Scrape Portuguese (Arquivo.pt)
 
 on:
-  # Run every hour
   schedule:
-    - cron: '0 * * * *'
-  
-  # Allow manual trigger
-  workflow_dispatch:
-    inputs:
-      target:
-        description: 'Number of articles to collect'
-        required: false
-        default: '50'
+    # Run every 6 hours at 00:00, 06:00, 12:00, 18:00 UTC
+    - cron: '0 */6 * * *'
+  workflow_dispatch:  # Allow manual trigger for testing
 
 jobs:
-  scrape:
+  scrape-portuguese:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
-    permissions:
-      contents: write
+    timeout-minutes: 360  # 6 hour timeout
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          # Need to fetch full history to preserve data
-          fetch-depth: 0
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-      
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Run scraper
-        run: |
-          TARGET=${{ github.event.inputs.target || '50' }}
-          python ukraine_war_scraper_improved.py \
-            --out ukraine_war_data \
-            --target $TARGET \
-            --max-requests 500
-      
-      - name: Check for new data
-        id: check_data
-        run: |
-          if [ -d "ukraine_war_data" ]; then
-            # Count JSON files
-            FILE_COUNT=$(find ukraine_war_data -name "*.json" | wc -l)
-            echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT
-            
-            # Get data size
-            DATA_SIZE=$(du -sh ukraine_war_data | cut -f1)
-            echo "data_size=$DATA_SIZE" >> $GITHUB_OUTPUT
-            
-            if [ $FILE_COUNT -gt 0 ]; then
-              echo "has_data=true" >> $GITHUB_OUTPUT
-            else
-              echo "has_data=false" >> $GITHUB_OUTPUT
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0  # Fetch all history for proper git operations
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'  # Cache pip dependencies
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4 deep-translator
+    
+    - name: Verify input directory exists
+      run: |
+        if [ ! -d "gdelt_portugal_data" ]; then
+          echo "ERROR: gdelt_portugal_data directory not found!"
+          echo "Please create it and add GDELT JSON files"
+          exit 1
+        fi
+        echo "✓ Input directory found"
+        ls -lh gdelt_portugal_data/ | head -10
+    
+    - name: Create output directory
+      run: |
+        mkdir -p scraped_portuguese
+        echo "✓ Output directory created"
+    
+    - name: Run Arquivo.pt scraper
+      id: scrape
+      run: |
+        echo "Starting Arquivo.pt scraper..."
+        python arquivo_scraper.py 2>&1 | tee scrape_arquivo.log
+        echo "status=completed" >> $GITHUB_OUTPUT
+      continue-on-error: true
+    
+    - name: Check scraping results
+      run: |
+        echo "Checking results..."
+        if [ -d "scraped_portuguese" ]; then
+          file_count=$(find scraped_portuguese -name "*.json" -type f | wc -l)
+          echo "Found $file_count JSON files in output"
+          
+          if [ $file_count -gt 0 ]; then
+            echo "✓ Scraping produced output files"
+            # Show summary of first file
+            first_file=$(find scraped_portuguese -name "*.json" -type f | head -1)
+            if [ -n "$first_file" ]; then
+              echo "Sample from $first_file:"
+              python -c "import json; data=json.load(open('$first_file')); print(f'Articles in file: {len(data)}')"
             fi
           else
-            echo "has_data=false" >> $GITHUB_OUTPUT
+            echo "⚠ No output files generated"
           fi
-      
-      - name: Commit and push data
-        if: steps.check_data.outputs.has_data == 'true'
-        run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-          git add ukraine_war_data/
+        fi
+    
+    - name: Generate progress report
+      run: |
+        echo "# Arquivo.pt Scraping Progress Report" > arquivo_report.md
+        echo "" >> arquivo_report.md
+        echo "**Run Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> arquivo_report.md
+        echo "**Workflow:** ${{ github.workflow }}" >> arquivo_report.md
+        echo "**Run Number:** ${{ github.run_number }}" >> arquivo_report.md
+        echo "" >> arquivo_report.md
+        
+        # Count input articles
+        echo "## Input Statistics" >> arquivo_report.md
+        if [ -d "gdelt_portugal_data" ]; then
+          input_files=$(find gdelt_portugal_data -name "*.json" -type f | wc -l)
+          echo "- Input files: $input_files" >> arquivo_report.md
           
-          # Create commit with stats
-          DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
-          FILES=${{ steps.check_data.outputs.file_count }}
-          SIZE=${{ steps.check_data.outputs.data_size }}
+          # Count total input articles if jq is available
+          total_input=$(find gdelt_portugal_data -name "*.json" -exec sh -c 'python -c "import json,sys; print(len(json.load(sys.stdin)))" < "$1"' _ {} \; 2>/dev/null | awk '{s+=$1} END {print s}')
+          echo "- Total input articles: ${total_input:-unknown}" >> arquivo_report.md
+        fi
+        echo "" >> arquivo_report.md
+        
+        # Count output articles
+        echo "## Output Statistics" >> arquivo_report.md
+        if [ -d "scraped_portuguese" ]; then
+          output_files=$(find scraped_portuguese -name "*.json" -type f | wc -l)
+          echo "- Output files: $output_files" >> arquivo_report.md
           
-          git diff --staged --quiet || git commit -m "Data collection: $DATE
+          # Count total output articles
+          total_output=$(find scraped_portuguese -name "*.json" -exec sh -c 'python -c "import json,sys; print(len(json.load(sys.stdin)))" < "$1"' _ {} \; 2>/dev/null | awk '{s+=$1} END {print s}')
+          echo "- Total scraped articles: ${total_output:-0}" >> arquivo_report.md
           
-          Files: $FILES
-          Total size: $SIZE
-          
-          [skip ci]"
-          
+          # Calculate completion rate
+          if [ -n "$total_input" ] && [ "$total_input" != "unknown" ] && [ "$total_input" -gt 0 ]; then
+            completion=$(echo "scale=2; ($total_output / $total_input) * 100" | bc)
+            echo "- **Completion rate:** ${completion}%" >> arquivo_report.md
+          fi
+        fi
+        echo "" >> arquivo_report.md
+        
+        # Extract summary from log
+        echo "## Last Run Summary" >> arquivo_report.md
+        echo "" >> arquivo_report.md
+        if [ -f "scrape_arquivo.log" ]; then
+          echo '```' >> arquivo_report.md
+          echo "Recent activity:" >> arquivo_report.md
+          grep -E "(Processing|Scraping|Successfully|Failed|Saved|Summary)" scrape_arquivo.log | tail -30 >> arquivo_report.md || echo "No detailed logs available" >> arquivo_report.md
+          echo '```' >> arquivo_report.md
+        else
+          echo "No log file generated" >> arquivo_report.md
+        fi
+        
+        echo "" >> arquivo_report.md
+        echo "---" >> arquivo_report.md
+        echo "*Generated by GitHub Actions*" >> arquivo_report.md
+        
+        # Display report
+        cat arquivo_report.md
+    
+    - name: Commit and push results
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        # Add all changes
+        git add scraped_portuguese/ arquivo_report.md scrape_arquivo.log
+        
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "🇵🇹 Update Arquivo.pt scraping results - $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
-      
-      - name: Upload artifacts (backup)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ukraine-war-data-${{ github.run_number }}
-          path: ukraine_war_data/
-          retention-days: 30
-
-      - name: Create summary
-        if: always()
-        run: |
-          echo "## Scraping Run Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Date**: $(date -u +"%Y-%m-%d %H:%M UTC")" >> $GITHUB_STEP_SUMMARY
-          echo "- **Files**: ${{ steps.check_data.outputs.file_count }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Size**: ${{ steps.check_data.outputs.data_size }}" >> $GITHUB_STEP_SUMMARY
-          
-          if [ -f "ukraine_war_data/progress.json" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Progress" >> $GITHUB_STEP_SUMMARY
-            echo '```json' >> $GITHUB_STEP_SUMMARY
-            cat ukraine_war_data/progress.json >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "✓ Changes committed and pushed"
+        fi
+    
+    - name: Upload logs as artifact
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: arquivo-logs
+        path: |
+          scrape_arquivo.log
+          arquivo_report.md
+        retention-days: 30
