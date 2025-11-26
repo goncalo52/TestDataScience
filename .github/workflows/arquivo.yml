@@ -1,0 +1,249 @@
+name: Scrape Portuguese Articles (Arquivo.pt)
+
+on:
+  schedule:
+    # Run every 6 hours at 00:00, 06:00, 12:00, 18:00 UTC
+    - cron: '0 */6 * * *'
+  workflow_dispatch:  # Allow manual trigger for testing
+
+jobs:
+  scrape-portuguese:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hour timeout
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        else
+          pip install requests beautifulsoup4 deep-translator
+        fi
+    
+    - name: Verify directory structure
+      run: |
+        echo "Checking directory structure..."
+        ls -la
+        
+        # Check input directory
+        if [ ! -d "data/gdeltdata/gdelt_portuguese_data" ]; then
+          echo "ERROR: data/gdeltdata/gdelt_portuguese_data not found!"
+          exit 1
+        fi
+        
+        echo "✓ Input directory found"
+        echo "Input files:"
+        ls -lh data/gdeltdata/gdelt_portuguese_data/ | head -10
+        
+        # Create output directory if it doesn't exist
+        mkdir -p data/scrapped/scrapped_portuguese
+        echo "✓ Output directory ready"
+    
+    - name: Run Arquivo.pt scraper
+      id: scrape
+      run: |
+        echo "Starting Arquivo.pt scraper..."
+        cd scripts
+        python arquivo_scraper.py 2>&1 | tee ../arquivo_scraper.log
+        cd ..
+      continue-on-error: true
+    
+    - name: Check scraping results
+      run: |
+        echo "=== Checking Results ==="
+        
+        if [ -d "data/scrapped/scrapped_portuguese" ]; then
+          file_count=$(find data/scrapped/scrapped_portuguese -name "*.json" -type f 2>/dev/null | wc -l)
+          echo "Output JSON files: $file_count"
+          
+          if [ $file_count -gt 0 ]; then
+            echo "✓ Scraping produced output files"
+            
+            # Count total articles
+            total_articles=0
+            for file in data/scrapped/scrapped_portuguese/*.json; do
+              if [ -f "$file" ]; then
+                count=$(python -c "import json; print(len(json.load(open('$file'))))" 2>/dev/null || echo "0")
+                total_articles=$((total_articles + count))
+                echo "  $(basename $file): $count articles"
+              fi
+            done
+            echo "Total articles scraped: $total_articles"
+          else
+            echo "⚠ No output files generated yet"
+          fi
+        else
+          echo "⚠ Output directory not found"
+        fi
+    
+    - name: Generate progress report
+      run: |
+        echo "# 🇵🇹 Arquivo.pt Scraping Progress Report" > arquivo_report.md
+        echo "" >> arquivo_report.md
+        echo "**Run Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> arquivo_report.md
+        echo "**Workflow Run:** #${{ github.run_number }}" >> arquivo_report.md
+        echo "**Triggered by:** ${{ github.event_name }}" >> arquivo_report.md
+        echo "" >> arquivo_report.md
+        
+        # Input statistics
+        echo "## 📥 Input Statistics" >> arquivo_report.md
+        echo "" >> arquivo_report.md
+        if [ -d "data/gdeltdata/gdelt_portuguese_data" ]; then
+          input_files=$(find data/gdeltdata/gdelt_portuguese_data -name "*.json" -type f 2>/dev/null | wc -l)
+          echo "- **Input files:** $input_files" >> arquivo_report.md
+          
+          # Count total input articles
+          total_input=0
+          for file in data/gdeltdata/gdelt_portuguese_data/*.json; do
+            if [ -f "$file" ]; then
+              count=$(python -c "import json; print(len(json.load(open('$file'))))" 2>/dev/null || echo "0")
+              total_input=$((total_input + count))
+            fi
+          done
+          echo "- **Total input articles:** $total_input" >> arquivo_report.md
+        else
+          echo "- **Input files:** 0 (directory not found)" >> arquivo_report.md
+        fi
+        echo "" >> arquivo_report.md
+        
+        # Output statistics
+        echo "## 📤 Output Statistics" >> arquivo_report.md
+        echo "" >> arquivo_report.md
+        if [ -d "data/scrapped/scrapped_portuguese" ]; then
+          output_files=$(find data/scrapped/scrapped_portuguese -name "*.json" -type f 2>/dev/null | wc -l)
+          echo "- **Output files:** $output_files" >> arquivo_report.md
+          
+          # Count total output articles
+          total_output=0
+          for file in data/scrapped/scrapped_portuguese/*.json; do
+            if [ -f "$file" ]; then
+              count=$(python -c "import json; print(len(json.load(open('$file'))))" 2>/dev/null || echo "0")
+              total_output=$((total_output + count))
+            fi
+          done
+          echo "- **Total scraped articles:** $total_output" >> arquivo_report.md
+          
+          # Calculate completion rate
+          if [ $total_input -gt 0 ]; then
+            completion=$(echo "scale=2; ($total_output * 100) / $total_input" | bc)
+            echo "- **Completion rate:** ${completion}%" >> arquivo_report.md
+            
+            # Progress bar
+            progress_int=$(echo "$completion / 1" | bc)
+            filled=$((progress_int / 5))
+            empty=$((20 - filled))
+            bar=$(printf '█%.0s' $(seq 1 $filled))$(printf '░%.0s' $(seq 1 $empty))
+            echo "- **Progress:** \`$bar\` ${completion}%" >> arquivo_report.md
+          fi
+        else
+          echo "- **Output files:** 0" >> arquivo_report.md
+          echo "- **Total scraped articles:** 0" >> arquivo_report.md
+        fi
+        echo "" >> arquivo_report.md
+        
+        # Recent activity
+        echo "## 📋 Recent Activity" >> arquivo_report.md
+        echo "" >> arquivo_report.md
+        if [ -f "arquivo_scraper.log" ]; then
+          echo '```' >> arquivo_report.md
+          # Get last 40 lines showing progress
+          tail -40 arquivo_scraper.log | grep -E "(Processing|Scraping|Successfully|Failed|Saved|Summary|Skipping|Found archive|✓|✗|💾)" >> arquivo_report.md || echo "No detailed activity logs available" >> arquivo_report.md
+          echo '```' >> arquivo_report.md
+        else
+          echo "No log file generated" >> arquivo_report.md
+        fi
+        echo "" >> arquivo_report.md
+        
+        # Error summary
+        if [ -f "arquivo_scraper.log" ]; then
+          error_count=$(grep -c "Error\|ERROR\|Failed" arquivo_scraper.log || echo "0")
+          if [ $error_count -gt 0 ]; then
+            echo "## ⚠️ Errors Detected" >> arquivo_report.md
+            echo "" >> arquivo_report.md
+            echo "- **Error count:** $error_count" >> arquivo_report.md
+            echo "" >> arquivo_report.md
+            echo "Recent errors:" >> arquivo_report.md
+            echo '```' >> arquivo_report.md
+            grep "Error\|ERROR\|Failed" arquivo_scraper.log | tail -10 >> arquivo_report.md || echo "None" >> arquivo_report.md
+            echo '```' >> arquivo_report.md
+            echo "" >> arquivo_report.md
+          fi
+        fi
+        
+        # Footer
+        echo "---" >> arquivo_report.md
+        echo "*Generated automatically by GitHub Actions*" >> arquivo_report.md
+        echo "" >> arquivo_report.md
+        echo "[View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> arquivo_report.md
+        
+        # Display report
+        echo ""
+        echo "=== Generated Report ==="
+        cat arquivo_report.md
+    
+    - name: Commit and push results
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        # Stage all changes
+        git add data/scrapped/scrapped_portuguese/
+        git add arquivo_report.md
+        git add arquivo_scraper.log
+        
+        # Check if there are changes
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          # Count new articles in this commit
+          new_articles=$(git diff --staged --stat | grep -o '[0-9]* insertion' | awk '{sum+=$1} END {print sum}')
+          
+          git commit -m "🇵🇹 Arquivo.pt: Update scraped Portuguese articles
+
+- Run: #${{ github.run_number }}
+- Date: $(date -u '+%Y-%m-%d %H:%M UTC')
+- Changes: ~$new_articles lines added
+
+[skip ci]"
+          git push
+          echo "✓ Changes committed and pushed"
+        fi
+    
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: arquivo-scraping-logs-${{ github.run_number }}
+        path: |
+          arquivo_scraper.log
+          arquivo_report.md
+        retention-days: 30
+    
+    - name: Summary
+      if: always()
+      run: |
+        echo "## 🇵🇹 Arquivo.pt Scraping Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -d "data/scrapped/scrapped_portuguese" ]; then
+          total=$(find data/scrapped/scrapped_portuguese -name "*.json" -exec python -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" {} \; 2>/dev/null | awk '{s+=$1} END {print s}')
+          echo "✅ **Total articles scraped:** ${total:-0}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️ No output directory found" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📊 [View detailed report](arquivo_report.md)" >> $GITHUB_STEP_SUMMA
