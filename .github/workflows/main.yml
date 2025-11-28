@@ -1,18 +1,14 @@
-name: Combined Data Scraper
+name: Scrape All Sources (Sequential)
 
 on:
   schedule:
-    - cron: '0 */4 * * *'  # Run every 3 hours
+    - cron: '0 */3 * * *'
   workflow_dispatch:
-
-concurrency:
-  group: scraping-workflows
-  cancel-in-progress: false
 
 jobs:
   scrape-all:
     runs-on: ubuntu-latest
-    timeout-minutes: 480  # 8 hours max
+    timeout-minutes: 480
     
     steps:
       - name: Checkout
@@ -27,32 +23,24 @@ jobs:
           
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
           pip install requests beautifulsoup4 deep-translator
-          
-      - name: Ensure directories exist
-        run: |
-          mkdir -p ./data/gdeltdata/gdelt_portuguese_data
-          mkdir -p ./data/scrapped/
       
-      # Run first scraper
-      - name: Run Arquivo Scraper
-        run: python3 arquivo_scraper.py
+      - name: Run Portuguese scraper
+        run: python scripts/arquivo_scraper.py --single
         continue-on-error: true
       
-      # Run second scraper
-      - name: Run Portuguese Scraper
-        run: python scripts/arquivo_scraper.py --single
+      - name: Run Russian/Ukrainian scraper
+        run: python scripts/wayback_scraper.py --single
         continue-on-error: true
           
       - name: Commit and push all results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/
+          git add data/scrapped/
           
           if ! git diff --staged --quiet; then
-            git commit -m "Update all scraped data [skip ci]"
+            git commit -m "Update all scraped articles [skip ci]"
             git pull --rebase origin main
             
             max_retries=5
