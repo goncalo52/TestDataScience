@@ -1,76 +1,80 @@
+name: Combined Data Scraper
 
-# ============================================
-# FILE 2: scrape-russian-ukrainian.yml
-# ============================================
----
-name: Scrape Russian & Ukrainian (Wayback)
 on:
   schedule:
-    - cron: '0 2,5,8,11,14,17,20,23 * * *' 
+    - cron: '0 */4 * * *'  # Run every 3 hours
   workflow_dispatch:
 
-# Same concurrency group - ensures only one scraper runs at a time
 concurrency:
   group: scraping-workflows
   cancel-in-progress: false
 
 jobs:
-  scrape:
+  scrape-all:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 480  # 8 hours max
     
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-    
-    - name: Install dependencies
-      run: |
-        pip install requests beautifulsoup4 deep-translator
-    
-    - name: Run scraper (single file mode)
-      run: |
-        python scripts/wayback_scraper.py --single
-    
-    - name: Commit and push results
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add data/scrapped/
-        
-        if ! git diff --staged --quiet; then
-          git commit -m "Update scraped articles (Russian/Ukrainian) [skip ci]"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
           
-          # Pull with rebase before pushing
-          git pull --rebase origin main
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
           
-          # Retry logic
-          max_retries=5
-          retry_count=0
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install requests beautifulsoup4 deep-translator
           
-          while [ $retry_count -lt $max_retries ]; do
-            if git push origin main; then
-              echo "Push successful"
-              exit 0
-            else
-              echo "Push failed, attempt $((retry_count + 1)) of $max_retries"
-              retry_count=$((retry_count + 1))
-              
-              if [ $retry_count -lt $max_retries ]; then
-                git pull --rebase origin main
-                sleep 5
+      - name: Ensure directories exist
+        run: |
+          mkdir -p ./data/gdeltdata/gdelt_portuguese_data
+          mkdir -p ./data/scrapped/
+      
+      # Run first scraper
+      - name: Run Arquivo Scraper
+        run: python3 arquivo_scraper.py
+        continue-on-error: true
+      
+      # Run second scraper
+      - name: Run Portuguese Scraper
+        run: python scripts/arquivo_scraper.py --single
+        continue-on-error: true
+          
+      - name: Commit and push all results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "Update all scraped data [skip ci]"
+            git pull --rebase origin main
+            
+            max_retries=5
+            retry_count=0
+            
+            while [ $retry_count -lt $max_retries ]; do
+              if git push origin main; then
+                echo "Push successful"
+                exit 0
+              else
+                echo "Push failed, attempt $((retry_count + 1)) of $max_retries"
+                retry_count=$((retry_count + 1))
+                
+                if [ $retry_count -lt $max_retries ]; then
+                  git pull --rebase origin main
+                  sleep 5
+                fi
               fi
-            fi
-          done
-          
-          echo "Failed to push after $max_retries attempts"
-          exit 1
-        else
-          echo "No changes to commit"
-        fi
+            done
+            
+            echo "Failed to push after $max_retries attempts"
+            exit 1
+          else
+            echo "No changes to commit"
+          fi
